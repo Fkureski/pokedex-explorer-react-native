@@ -1,18 +1,23 @@
 import axios from 'axios';
+import type { PokemonDetails, PokemonListResponse } from '../types/pokemon';
+
 const api = axios.create({ baseURL: 'https://pokeapi.co/api/v2' });
 
-export async function list(offset = 0, limit = 20) {
-    const { data } = await api.get(`/pokemon?offset=${offset}&limit=${limit}`);
-    return data as { results: { name: string; url: string }[]; next: string | null };
+export async function list(offset = 0, limit = 20): Promise<PokemonListResponse> {
+  const { data } = await api.get(`/pokemon?offset=${offset}&limit=${limit}`);
+  return data as PokemonListResponse;
 }
 
-export async function details(idOrName: string) {
-    const { data } = await api.get(`/pokemon/${idOrName}`);
-    return data as any;
+export async function details(idOrName: string): Promise<PokemonDetails> {
+  const { data } = await api.get(`/pokemon/${idOrName}`);
+  return data as PokemonDetails;
 }
 
-export async function search(query: string) {
-    const q = query.trim().toLowerCase();
-    if (!q) throw new Error('Query vazia');
-    return details(q);
+let cachedNames: string[] | null = null;
+
+export async function allNames(): Promise<string[]> {
+  if (cachedNames) return cachedNames;
+  const { data } = await api.get<PokemonListResponse>('/pokemon?limit=2000&offset=0');
+  cachedNames = data.results.map(r => r.name);
+  return cachedNames!;
 }
