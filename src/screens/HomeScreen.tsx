@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation';
-import { list, details, allNames } from '../services/pokeapi';
+import { list, details } from '../services/pokeapi';
 import SearchBar from '../components/SearchBar';
 import Loader from '../components/Loader';
 import ErrorView from '../components/ErrorView';
@@ -27,12 +27,6 @@ export default function HomeScreen({ navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const [q, setQ] = useState('');
-  const [nameIndex, setNameIndex] = useState<string[] | null>(null);
-  const [searchCards, setSearchCards] = useState<Item[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-
-  const query = q.trim().toLowerCase();
-  const inSearchMode = query.length > 0;
 
   const detailsCache = useRef<Map<string, Item>>(new Map());
   async function loadDetailsCached(key: string): Promise<Item | null> {
@@ -49,7 +43,6 @@ export default function HomeScreen({ navigation }: Props) {
     }
   }
 
-  // Página inicial
   async function loadPage(initial = false) {
     try {
       if (initial) { setOffset(0); setItems([]); }
@@ -77,60 +70,28 @@ export default function HomeScreen({ navigation }: Props) {
     finally { setRefreshing(false); }
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!inSearchMode) { setSearchCards([]); return; }
+  function goToDetailsFromQuery() {
+    const term = q.trim().toLowerCase().replace(/^#/, '');
+    if (!term) return;
+    navigation.navigate('Details', { idOrName: term });
+  }
 
-      const numericRaw = query.replace('#', '');
-      const isNumeric = /^\d+$/.test(numericRaw);
-
-      if (isNumeric) {
-        setSearchLoading(true);
-        const item = await loadDetailsCached(numericRaw);
-        if (!cancelled) {
-          setSearchCards(item ? [item] : []);
-          setSearchLoading(false);
-        }
-        return;
-      }
-
-      try {
-        setSearchLoading(true);
-        const idx = nameIndex ?? await allNames().then(n => { setNameIndex(n); return n; });
-        const filteredNames = idx.filter(n => n.includes(query)).slice(0, 40);
-        const cards: Item[] = [];
-        for (const name of filteredNames) {
-          const it = await loadDetailsCached(name);
-          cards.push(it ?? { name });
-        }
-        if (!cancelled) setSearchCards(cards);
-      } finally {
-        if (!cancelled) setSearchLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [inSearchMode, query, nameIndex]);
-
-  const dataToRender = inSearchMode ? searchCards : items;
   const canLoadMore = useMemo(() => !loading, [loading]);
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Cabeçalho limpo */}
       <View style={styles.header}>
         <Text style={styles.title}>Pokédex</Text>
 
         <View style={styles.row}>
           <View style={styles.searchCard}>
-            <SearchBar value={q} onChange={setQ} />
+            <SearchBar value={q} onChange={setQ} onSearch={goToDetailsFromQuery} />
           </View>
 
           <Pressable
             onPress={() => navigation.navigate('Favorites')}
-            style={({ pressed }) => [
-              styles.favBtn,
-              pressed && styles.favBtnPressed,
-            ]}
+            style={({ pressed }) => [styles.favBtn, pressed && styles.favBtnPressed]}
             accessibilityRole="button"
             accessibilityLabel="Abrir favoritos"
           >
@@ -139,22 +100,16 @@ export default function HomeScreen({ navigation }: Props) {
         </View>
       </View>
 
-      {error && !inSearchMode && <ErrorView message={error} />}
-      {loading && !inSearchMode && items.length === 0 && <Loader />}
-      {inSearchMode && searchLoading && dataToRender.length === 0 && <Loader />}
+      {error && <ErrorView message={error} />}
+      {loading && items.length === 0 && <Loader />}
 
-      {/* Lista */}
-      {dataToRender.length === 0 && !(loading || searchLoading) ? (
+      {items.length === 0 && !loading ? (
         <View style={styles.emptyWrap}>
-          <Text style={styles.emptyText}>
-            {/^\#?\d+$/.test(query)
-              ? `Nenhum Pokémon com o número ${query.replace('#','')}.`
-              : `Nenhum Pokémon encontrado para “${q}”.`}
-          </Text>
+          <Text style={styles.emptyText}>Nenhum Pokémon carregado.</Text>
         </View>
       ) : (
         <FlatList
-          data={dataToRender}
+          data={items}
           keyExtractor={(it) => it.name}
           numColumns={2}
           contentContainerStyle={styles.listContent}
@@ -167,17 +122,15 @@ export default function HomeScreen({ navigation }: Props) {
               onPress={() => navigation.navigate('Details', { idOrName: item.name })}
             />
           )}
-          refreshing={!inSearchMode ? refreshing : false}
-          onRefresh={!inSearchMode ? onRefresh : undefined}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           ListFooterComponent={
-            !inSearchMode ? (
-              <View style={styles.footer}>
-                {loading && items.length > 0 ? <Loader /> :
-                 <Pressable onPress={() => canLoadMore && loadPage()} style={styles.loadMoreBtn}>
-                   <Text style={styles.loadMoreText}>Carregar mais</Text>
-                 </Pressable>}
-              </View>
-            ) : null
+            <View style={styles.footer}>
+              {loading && items.length > 0 ? <Loader /> :
+               <Pressable onPress={() => canLoadMore && loadPage()} style={styles.loadMoreBtn}>
+                 <Text style={styles.loadMoreText}>Carregar mais</Text>
+               </Pressable>}
+            </View>
           }
         />
       )}
@@ -186,89 +139,36 @@ export default function HomeScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#FAFAFA',
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 10,
-    gap: 10,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'stretch',
-  },
+  safe: { flex: 1, backgroundColor: '#FAFAFA' },
+  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10, gap: 10 },
+  title: { fontSize: 26, fontWeight: '800', letterSpacing: 0.2 },
+  row: { flexDirection: 'row', gap: 10, alignItems: 'stretch' },
   searchCard: {
     flex: 1,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: Platform.select({ ios: 8, android: 4 }),
-    // sombra sutil
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 }, elevation: 2,
   },
   favBtn: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    backgroundColor: '#111827', borderRadius: 12, paddingHorizontal: 14, justifyContent: 'center',
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 }, elevation: 3,
   },
-  favBtnPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.98 }],
-  },
-  favBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 24,
-  },
-  listRow: {
-    gap: 12,
-  },
-  footer: {
-    paddingVertical: 16,
-  },
+  favBtnPressed: { opacity: 0.9, transform: [{ scale: 0.98 }] },
+  favBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  listContent: { paddingHorizontal: 12, paddingBottom: 24 },
+  listRow: { gap: 12 },
+  footer: { paddingVertical: 16 },
   loadMoreBtn: {
-    alignSelf: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    alignSelf: 'center', backgroundColor: '#FFFFFF', borderRadius: 999,
+    paddingVertical: 10, paddingHorizontal: 16,
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
-  loadMoreText: {
-    fontWeight: '700',
-  },
-  emptyWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 24,
-  },
-  emptyText: {
-    color: '#6B7280',
-  },
+  loadMoreText: { fontWeight: '700' },
+  emptyWrap: { paddingHorizontal: 16, paddingTop: 24 },
+  emptyText: { color: '#6B7280' },
 });
